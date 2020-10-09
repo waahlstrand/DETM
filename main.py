@@ -19,6 +19,8 @@ import data
 from sklearn.decomposition import PCA
 from torch import nn, optim
 from torch.nn import functional as F
+from torch.utils.tensorboard import SummaryWriter
+
 
 from detm import DETM
 from utils import nearest_neighbors, get_topic_coherence
@@ -191,9 +193,10 @@ else:
     print('Defaulting to vanilla SGD')
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
-def train(epoch):
+
+def train(epoch, writer):
     """Train DETM on data for one epoch.
-    """
+    """    
     model.train()
     acc_loss = 0
     acc_nll = 0
@@ -215,6 +218,7 @@ def train(epoch):
             normalized_data_batch = data_batch
 
         loss, nll, kl_alpha, kl_eta, kl_theta = model(data_batch, normalized_data_batch, times_batch, train_rnn_inp, args.num_docs_train)
+
         loss.backward()
         if args.clip > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -248,7 +252,15 @@ def train(epoch):
             epoch, lr, cur_kl_theta, cur_kl_eta, cur_kl_alpha, cur_nll, cur_loss))
     print('*'*100)
 
-def visualize():
+    # Log to tensorboard
+    writer.add_scalars('losses', {'NELBO (loss)': cur_loss,
+                                  'negative log likelihood (rec loss)': cur_nll}, epoch)
+
+    writer.add_scalars('Kullback-Liebler divergence', {'KL α': cur_kl_alpha,
+                                                       'KL θ': cur_kl_theta,
+                                                       'KL η': cur_kl_eta, }, epoch)
+
+def visualize(writer):
     """Visualizes topics and embeddings and word usage evolution.
     """
     model.eval()
@@ -271,7 +283,7 @@ def visualize():
 
         print('\n')
         print('Visualize word embeddings ...')
-        queries = ['economic', 'assembly', 'security', 'management', 'debt', 'rights',  'africa']
+        queries = ['economy', 'vietnam', 'islam', 'climate', 'debt', 'electricity',  'africa']
         try:
             embeddings = model.rho.weight  # Vocab_size x E
         except:
@@ -281,6 +293,9 @@ def visualize():
             print('word: {} .. neighbors: {}'.format(
                 word, nearest_neighbors(word, embeddings, vocab, args.num_words)))
         print('#'*100)
+
+        writer.add_embedding(embeddings, metadata=vocab, tag='ρ, word embeddings')
+        writer.add_embedding(beta[:,0,:].T, metadata=vocab, tag='β, topic-word assignments')
 
         # print('\n')
         # print('Visualize word evolution ...')
@@ -476,11 +491,20 @@ if args.mode == 'train':
     best_epoch = 0
     best_val_ppl = 1e9
     all_val_ppls = []
+
+    # Create a writer for Tensorboard
+    writer = SummaryWriter('runs/data')
+
     for epoch in range(1, args.epochs):
-        train(epoch)
+        train(epoch, writer)
+
         if epoch % args.visualize_every == 0:
-            visualize()
+            visualize(writer)
+
         val_ppl = get_completion_ppl('val')
+
+        writer.add_scalars('Perplexity', {'Document completion perplexity': val_ppl}, epoch)
+
         print('val_ppl: ', val_ppl)
         if val_ppl < best_val_ppl:
             with open(ckpt, 'wb') as f:
@@ -510,6 +534,8 @@ if args.mode == 'train':
         val_ppl = get_completion_ppl('val')
         print('computing test perplexity...')
         test_ppl = get_completion_ppl('test')
+
+    writer.close()
 else: 
     with open(ckpt, 'rb') as f:
         model = torch.load(f)
