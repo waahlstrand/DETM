@@ -1,3 +1,9 @@
+# Experiments
 results/
+runs/
+
+# Python files
 __pycache__/
 
+# Jupyter
+*.ipynb

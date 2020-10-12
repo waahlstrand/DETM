@@ -191,7 +191,7 @@ class DETM(nn.Module):
         nll = nll.sum(-1)
         return nll  
 
-    def forward(self, bows, normalized_bows, times, rnn_inp, num_docs):
+    def forward(self, bows, normalized_bows, times, rnn_inp, num_docs, epoch, kl_factor=None):
         bsz = normalized_bows.size(0)
         coeff = num_docs / bsz 
         alpha, kl_alpha = self.get_alpha()
@@ -203,7 +203,23 @@ class DETM(nn.Module):
         beta = beta[times.type('torch.LongTensor')]
         nll = self.get_nll(theta, beta, bows)
         nll = nll.sum() * coeff
-        nelbo = nll + kl_alpha + kl_eta + kl_theta
+
+        # Annealing in style of beta-VAEs
+        # Allows the network to train without regularization initially
+        if kl_factor:
+
+            # kl_factor between 0.05 and 0.1
+
+            # Start epoch of annealing
+            plateau = 150
+
+            annealing = 2*(F.sigmoid(kl_factor*(epoch-plateau))-0.5)
+            nelbo = nll + annealing*(kl_alpha + kl_eta + kl_theta)
+
+        else:
+
+            nelbo = nll + kl_alpha + kl_eta + kl_theta
+
         return nelbo, nll, kl_alpha, kl_eta, kl_theta
 
     def init_hidden(self):
