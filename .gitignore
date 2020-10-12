@@ -6,4 +6,4 @@ runs/
 __pycache__/
 
 # Jupyter
-*.ipynb
+# *.ipynb
