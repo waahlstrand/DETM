@@ -27,6 +27,7 @@ class DETM(nn.Module):
         self.t_drop = nn.Dropout(args.enc_drop)
         self.delta = args.delta
         self.train_embeddings = args.train_embeddings
+        self.n_epochs = args.epochs
 
         self.theta_act = self.get_activation(args.theta_act)
 
@@ -191,7 +192,46 @@ class DETM(nn.Module):
         nll = nll.sum(-1)
         return nll  
 
-    def forward(self, bows, normalized_bows, times, rnn_inp, num_docs, epoch, kl_factor=None):
+    def get_kl_annealing(self, epoch, **kwargs):
+
+        schedule = kwargs["kl_anneal"]
+
+        if schedule == 'sigmoid':
+
+            temperature = 0.05
+
+            plateau = kwargs["kl_sigmoid"]
+            x = torch.tensor(temperature*(epoch-plateau))
+            annealing = torch.sigmoid(x)
+
+        elif schedule == 'linear':
+
+            plateau = torch.tensor(kwargs["kl_linear"], dtype=float)
+            epoch   = torch.tensor(epoch, dtype=float)
+            annealing = torch.min(epoch, plateau).div(plateau)
+
+        elif schedule == 'cyclic':
+
+            R = kwargs["kl_cyclic_R"]
+            n_cycles = kwargs["kl_cyclic_period"]
+
+            n_epochs = self.n_epochs
+
+            tau = torch.remainder(torch.tensor(epoch), torch.ceil(torch.tensor(n_epochs/n_cycles))).div(n_epochs/n_cycles)
+
+            if tau <= R:
+                annealing = tau/R
+
+            else:
+                annealing = 1
+
+        else:
+            annealing = 1
+
+        return annealing
+        
+
+    def forward(self, bows, normalized_bows, times, rnn_inp, num_docs, epoch, **kwargs):
         bsz = normalized_bows.size(0)
         coeff = num_docs / bsz 
         alpha, kl_alpha = self.get_alpha()
@@ -206,19 +246,9 @@ class DETM(nn.Module):
 
         # Annealing in style of beta-VAEs
         # Allows the network to train without regularization initially
-        if kl_factor:
+        annealing = self.get_kl_annealing(epoch, **kwargs)
 
-            # kl_factor between 0.05 and 0.1
-
-            # Start epoch of annealing
-            plateau = 150
-
-            annealing = 2*(F.sigmoid(kl_factor*(epoch-plateau))-0.5)
-            nelbo = nll + annealing*(kl_alpha + kl_eta + kl_theta)
-
-        else:
-
-            nelbo = nll + kl_alpha + kl_eta + kl_theta
+        nelbo = nll + annealing*(kl_alpha + kl_eta + kl_theta)
 
         return nelbo, nll, kl_alpha, kl_eta, kl_theta
 

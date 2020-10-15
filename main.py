@@ -63,7 +63,10 @@ parser.add_argument('--bow_norm', type=int, default=1, help='normalize the bows 
 
 # Modifications
 parser.add_argument('--kl_anneal', type=str, default='none', help='annealing of kl term in loss')
-parser.add_argument('--kl_factor', type=float, default=0.05, help='temperature of kl annealing')
+parser.add_argument('--kl_linear', type=int, default=150, help='plateau of linear kl annealing')
+parser.add_argument('--kl_sigmoid', type=int, default=150, help='plateau of sigmoid kl annealing')
+parser.add_argument('--kl_cyclic_R', type=float, default=0.5, help='threshold of cyclic kl annealing')
+parser.add_argument('--kl_cyclic_period', type=int, default=4, help='period of cyclic kl annealing')
 
 ### evaluation, visualization, and logging-related arguments
 parser.add_argument('--num_words', type=int, default=20, help='number of words for topic viz')
@@ -198,11 +201,11 @@ else:
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
 
-if args.kl_anneal == 'sigmoid':
-    kl_factor = args.kl_factor
-else:
-    kl_factor = None
-
+annealing = {'kl_anneal': args.kl_anneal,
+             'kl_linear': args.kl_linear,
+             'kl_sigmoid': args.kl_sigmoid,
+             'kl_cyclic_period': args.kl_cyclic_period,
+             'kl_cyclic_R': args.kl_cyclic_R}
 
 def train(epoch, writer):
     """Train DETM on data for one epoch.
@@ -227,7 +230,7 @@ def train(epoch, writer):
         else:
             normalized_data_batch = data_batch
 
-        loss, nll, kl_alpha, kl_eta, kl_theta = model(data_batch, normalized_data_batch, times_batch, train_rnn_inp, args.num_docs_train, epoch, args.kl_factor)
+        loss, nll, kl_alpha, kl_eta, kl_theta = model(data_batch, normalized_data_batch, times_batch, train_rnn_inp, args.num_docs_train, epoch, **annealing)
 
         loss.backward()
         if args.clip > 0:
@@ -304,8 +307,8 @@ def visualize(epoch, writer):
                 word, nearest_neighbors(word, embeddings, vocab, args.num_words)))
         print('#'*100)
 
-        writer.add_embedding(embeddings, metadata=vocab, tag='ρ, word embeddings', global_step=epoch)
-        writer.add_embedding(beta[:,0,:].T, metadata=vocab, tag='β, topic-word assignments', global_step=epoch)
+        # writer.add_embedding(embeddings, metadata=vocab, tag='ρ, word embeddings', global_step=epoch)
+        # writer.add_embedding(beta[:,0,:].T, metadata=vocab, tag='β, topic-word assignments', global_step=epoch)
 
         # print('\n')
         # print('Visualize word evolution ...')
